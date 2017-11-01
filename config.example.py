@@ -10,6 +10,13 @@ DB_ENGINE = 'sqlite:///db.sqlite'
 #DB_ENGINE = 'mysql://user:pass@localhost/monocle'
 #DB_ENGINE = 'postgresql://user:pass@localhost/monocle
 
+### DB queue/pool size settings
+### These are to be used if you see errors relating to pool_size from sqlalchemy
+### DO not set extremely high
+#
+# DB_POOL_SIZE = 5     # sqlalchemy defualt
+# DB_MAX_OVERFLOW = 10 # sqlalchemy default
+
 ## Reconnect db session after x seconds. It solves lost connection error if DB wait_timeout is set to lower values.
 # DB_POOL_RECYCLE = 600
 
@@ -264,6 +271,8 @@ REPORT_MAPS = True  # Show maps on reports
 #CAPTCHAS_ALLOWED = 3
 ## Get new accounts from the CAPTCHA queue first if it's not empty
 #FAVOR_CAPTCHA = True
+## Use anticaptcha instead of 2captcha
+#USE_ANTICAPTCHA = True
 
 # allow displaying the live location of workers on the map
 MAP_WORKERS = True
