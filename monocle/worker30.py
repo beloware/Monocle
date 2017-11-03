@@ -8,12 +8,14 @@ from pogeo import get_distance
 
 from .db import SightingCache, Sighting, Spawnpoint, session_scope
 from .utils import randomize_point
-from .worker import Worker, UNIT, sb_detector, HARDCORE_HYPERDRIVE
+from .worker import Worker, UNIT, sb_detector
 from .shared import LOOP, call_at, get_logger
 from .accounts import get_accounts30, Account
 from . import db_proc, bounds, spawns, sanitized as conf
 
 log = get_logger("worker30")
+
+HARDCORE_HYPERDRIVE = not conf.LV30_GMO
 
 class EncounterSkippedError(Exception):
     """Raised when encounter is skipped without retry"""
@@ -37,6 +39,9 @@ class Worker30(Worker):
     workers_needed = int(ceil(conf.LV30_PERCENT_OF_WORKERS * conf.GRID[0] * conf.GRID[1]))
     job_queue = PriorityQueue(maxsize=conf.LV30_MAX_QUEUE)
     coroutine_semaphore = Semaphore(workers_needed, loop=LOOP)
+
+    def needs_sleep(self):
+        return False 
 
     def min_level(self):
         return 30
@@ -103,6 +108,7 @@ class Worker30(Worker):
                         if job in ENCOUNTER_CACHE:
                             continue
             
+                        await sleep(conf.LV30_ENCOUNTER_WAIT, loop=LOOP)
                         await self.coroutine_semaphore.acquire()
                         LOOP.create_task(self.try_point(job))
                 except Exception as e:
@@ -117,17 +123,6 @@ class Worker30(Worker):
         except Exception as e:
             log.warning("A wild error appeared in launcher: {}", e)
 
-
-    async def sleep_travel_time(self, point):
-        if conf.LV30_MAX_SPEED and not HARDCORE_HYPERDRIVE:
-            distance = get_distance(self.location, point, UNIT)
-            time_needed = 3600.0 * distance / conf.LV30_MAX_SPEED 
-            if self.username:
-                if time_needed > 0.0:
-                    log.info("{} needs {}s of travel time.", self.username, int(time_needed))
-                    await sleep(time_needed, loop=LOOP)
-                    return True
-        return False
 
     @classmethod
     async def try_point(self, job):
@@ -153,9 +148,10 @@ class Worker30(Worker):
             async with worker.busy:
                 if spawn_time:
                     worker.after_spawn = time() - spawn_time
-                if await worker.sleep_travel_time(point):
-                    if job in ENCOUNTER_CACHE:
-                        return
+                if conf.LV30_MAX_SPEED and not HARDCORE_HYPERDRIVE:
+                    if await worker.sleep_travel_time(point, max_speed=conf.LV30_MAX_SPEED):
+                        if job in ENCOUNTER_CACHE:
+                            return
                 ENCOUNTER_CACHE.remove(job['encounter_id'], job['spawn_id'])
                 visit_result = await worker.visit(point,
                         encounter_id=encounter_id,
@@ -164,6 +160,7 @@ class Worker30(Worker):
                         sighting=job)
                 if visit_result == -1:
                     self.hash_burn += 1
+                    await sleep(1.0, loop=LOOP)
                     point = randomize_point(point,amount=0.00001) # jitter around 3 meters
                     ENCOUNTER_CACHE.remove(job['encounter_id'], job['spawn_id'])
                     visit_result = await worker.visit(point,
@@ -217,7 +214,7 @@ class Worker30(Worker):
             ENCOUNTER_CACHE.add(job)
             job['check_duplicate'] = True
             db_proc.add(job)
-            log.info("Skipping encounter {} due to error: {}.", encounter_id, e)
+            log.info("Skipping encounter {} due to error: {}", encounter_id, e)
         except Exception as e:
             log.error('An exception occurred in try_point: {}', e)
         finally:
